@@ -140,6 +140,9 @@ void setup() {
   delay(3000);
   Serial.begin(115200);
   LOG_INIT(&Serial);
+
+  /** initialize Cairsens UART com - if called at end of setup, BT does not work */
+  cairsensSerial.begin(9600);
   
   mySerial.begin(115200);
   mySerial.println("BC:BR=08");
@@ -164,9 +167,6 @@ void setup() {
   mySerial.print(("BC:NM=AirBeam-"));
   mySerial.println(inData);
   bt_buffer[0] = 0;
-
-  /** initialize Cairsens UART com */
-  cairsensSerial.begin(9600);
   
   pinMode(LEDPIN, OUTPUT);
   starttime = millis();
