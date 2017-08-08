@@ -41,13 +41,15 @@
 #define DHTTYPE DHT_TYPE_22   // DHT 22  (AM2302)
 
 #define LEDPIN 13
-#define BT_BUF_LEN 50
+#define BT_BUF_LEN 50U
+
+#define NB_NO2_MEAS 60U
 /**************************************************************************
  * Manifest Constants
  **************************************************************************/
 static const uint16_t AVG_PERIOD        = 1000;
 static const uint16_t BT_STATUS_PERIOD  = 100;
-static const uint16_t NO2_SAMPLE_TIME   = 100;
+static const uint16_t NO2_SAMPLE_TIME   = 500;
 static const uint16_t PM_SAMPLE_TIME    = 200;
 static const uint16_t LED_BLINK_PERIOD  = 200;
 /**************************************************************************
@@ -71,8 +73,8 @@ static unsigned long pm_sum = 0;
 static uint16_t pm_nbmeas;
 static unsigned long pm_starttime = 0;
 
-static unsigned long no2_sum = 0;
-static uint16_t no2_nbmeas = 0;
+static uint8_t no2_meas[NB_NO2_MEAS] = {0};
+static uint8_t no2_meas_index = 0;
 static unsigned long no2_starttime = 0;
 
 static unsigned long bt_status_time = 0;
@@ -139,6 +141,8 @@ void setup() {
   avg_time = millis();
   bt_status_time = millis();
 
+  no2_meas[NB_NO2_MEAS - 1] = CairsensUART::NO2_MAX + 1;
+
   /** Initially BT not connected */
   Timer1.start();
 }
@@ -147,7 +151,7 @@ void loop() {
   /** Always poll DHT */
   if(dht.measure(&temp_cel, &hum))
   {
-    LOG_INFO("New DHT measure : %dRH %d°C", temp_cel, hum);
+    LOG_INFO_LN(F("New DHT measure : %fRH %f°C"), temp_cel, hum);
   }
 
   /** Periodic BT status update */
@@ -160,10 +164,11 @@ void loop() {
   /** Periodic measures computing */
   if ((millis() - avg_time) > AVG_PERIOD)
   {
-    if(temp_cel != NAN && hum != NAN)
+    /** Compute all sensor measures */
+    avg_time = millis(); // moved to create more regular periods.
+    
+    if(!isnan(temp_cel) && !isnan(hum) && !(no2_meas[NB_NO2_MEAS - 1] == CairsensUART::NO2_MAX + 1 && no2_meas_index == 0))
     {
-      /** Compute all sensor measures */
-      avg_time = millis(); // moved to create more regular periods.
       double loc_pm = (double)pm_sum/pm_nbmeas;
       loc_pm = (loc_pm*5.0)/1024;
       double loc_hppcf = (240.0*pow(loc_pm,6) - 2491.3*pow(loc_pm,5) + 9448.7*pow(loc_pm,4) - 14840.0*pow(loc_pm,3) + 10684.0*pow(loc_pm,2) + 2211.8*(loc_pm) + 7.9623);
@@ -172,8 +177,23 @@ void loop() {
       {
         loc_ugm3 = 0;
       }
+
+      unsigned long loc_no2_sum = 0;
+      uint8_t loc_u8_nbMeas = NB_NO2_MEAS;
+      /** Moving average on a limited window */
+      if(no2_meas[NB_NO2_MEAS - 1] == CairsensUART::NO2_MAX + 1)
+      {
+        loc_u8_nbMeas = no2_meas_index;
+      }
+      
+      for(uint8_t i = 0; i < loc_u8_nbMeas; i++)
+      {
+        loc_no2_sum += no2_meas[i];
+      }
+      
+      float loc_no2_ppm = CairsensUART::ppbToPpm(CairsensUART::NO2, loc_no2_sum/(float)loc_u8_nbMeas);
     
-      LOG_INFO_LN(F("\n%l - AirBeam MAC: %s - Temp: %f°F %f°C - Hum : %dRH - PM2.5 : hppcf: %f  ugm^3: %f - NO2 Gas: %fppm"), 
+      LOG_INFO_LN(F("\n%l - AirBeam MAC: %s - Temp: %f°F %f°C - Hum : %fRH - PM2.5 : hppcf: %f  ugm^3: %f - NO2 Gas: %fppm"), 
         millis(),
         airbeam_mac.c_str(),
         (temp_cel * 9)/5 + 32,
@@ -181,7 +201,7 @@ void loop() {
         hum,
         loc_hppcf,
         loc_ugm3,
-        no2_sum/(10.0*no2_nbmeas));
+        loc_no2_ppm);
     
       if(bt_connected == CONNECTED){
         bt_serial.print(loc_ugm3);
@@ -209,7 +229,7 @@ void loop() {
         bt_serial.print((";AirBeam-RH;Humidity;RH;percent;%;0;25;50;75;100"));
         bt_serial.print("\n");
         
-        bt_serial.print(no2_sum/(10.0*no2_nbmeas));
+        bt_serial.print(loc_no2_ppm);
         bt_serial.print((";AirBeam:"));
         bt_serial.print(airbeam_mac);
         bt_serial.print(";Cairsens A40-0020-B;Azote dioxyde;N02;micrograms per cubic meter;µg/m³;0;12;35;55;150");
@@ -218,11 +238,8 @@ void loop() {
     }
     else /** Measurements data set not ready */
     {
-      LOG_INFO_LN(F("Data set not ready : cannot get humidity or temperature measures"));
-    }
-    no2_sum = 0;
-    no2_nbmeas = 0;
-  
+      LOG_INFO_LN(F("Measurement data set not ready"));
+    }  
     pm_sum = 0;
     pm_nbmeas = 0;
   }
@@ -230,12 +247,12 @@ void loop() {
   /** Periodic NO2 measurement */
   if ((millis() - no2_starttime) > NO2_SAMPLE_TIME)
   {
-    uint8_t nox_val = 0;
-    if(cairsens.getInstantValue(nox_val) == CairsensUART::NO_ERROR)
+    uint8_t no2_val = 0;
+    if(cairsens.getNO2InstantVal(no2_val) == CairsensUART::NO_ERROR)
     {
-      LOG_INFO_LN(F("%l - current NOX value = %fppm"), millis(), nox_val/10.0);
-      no2_nbmeas++;
-      no2_sum += nox_val;
+      no2_meas[no2_meas_index] = no2_val;
+      no2_meas_index = (no2_meas_index + 1) % NB_NO2_MEAS;
+      LOG_INFO_LN(F("%l - current NOX value = %fppm"), millis(), CairsensUART::ppbToPpm(CairsensUART::NO2, no2_val));
     }
     else
     {

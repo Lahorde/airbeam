@@ -54,7 +54,17 @@ class CairsensUART
       NO_ERROR,
       BAD_CRC,
       TIMEOUT,
+      BAD_RANGE,
+      BAD_FRAME
     }EError;
+    
+   typedef enum{
+     NO2,
+     NO,
+   }EPollutantType;
+   
+   /** Max cairclip NO2 value in ppb */
+   static const uint8_t NO2_MAX = 250;
     
   /** Private members */
   private :
@@ -90,6 +100,10 @@ class CairsensUART
   static const uint8_t CRC_LENGTH = 0x02;
   static const uint8_t CMD_TYPE_LENGTH = 0x01; 
   static const uint8_t GET_INSTANT_VAL_RSP[]; 
+  
+  /** CRC computed from byte at this index to last bytes - 2 (CRC length) */
+  static const uint8_t START_CRC_POS = 0x02; 
+  static const uint8_t CRC_LEN       = 0x02; 
 
   typedef enum
   { 
@@ -108,6 +122,24 @@ class CairsensUART
      */
     CairsensUART(Stream* arg_p_uartStream);
 
+    
+    /**
+     * @brief Get NO2 concentration in ppb. 
+     * Cairsens NO2 concentration range [0 to 250]ppb
+     *
+     * @param uint8_t
+     *
+     * @return 
+     */
+    EError getNO2InstantVal(uint8_t& arg_u8_val);
+
+    /**
+     * Converts Parts per billion to µg/m3 http://www2.dmu.dk/AtmosphericEnvironment/Expost/database/docs/PPM_conversion.pdf
+     */
+    static float ppbToPpm(EPollutantType arg_e_polType, float arg_f_ppb); 
+      
+  /** private methods */  
+  private :
     /**
      * @brief Get current value of the Cairsens. It reads last 1 minute data stored.
      *
@@ -115,10 +147,7 @@ class CairsensUART
      *
      * @return return code 
      */
-    EError getInstantValue(uint8_t&);
-      
-  /** private methods */  
-  private :
+    EError getInstantVal(uint8_t&);
     
     /**
      * @brief Get sensor life in percent from Life byte value
@@ -128,6 +157,17 @@ class CairsensUART
      * @return 
      */
     uint8_t lifeToPercent(uint8_t arg_u8_life);
+    
+
+    /**
+     * @brief Compute CRC
+     *
+     * @param Frame[]
+     * @param lg
+     *
+     * @return 
+     */
+    uint32_t FCRC(unsigned char Frame[], unsigned char lg);
 };
 
 #endif /* CAIRSENS_H */
