@@ -46,7 +46,7 @@
  **************************************************************************/
 static const uint16_t BT_PUBLISH_PERIOD = 1000;
 static const uint16_t BT_STATUS_PERIOD  = 100;
-static const uint16_t NO2_SAMPLE_TIME   = 500;
+static const uint16_t NO2_SAMPLE_TIME   = 100;
 static const uint16_t PM_SAMPLE_TIME    = 200;
 static const uint16_t LED_BLINK_PERIOD  = 200;
 /**************************************************************************
@@ -91,11 +91,11 @@ static DHT dht(DHTPIN, DHTTYPE);
  but only 1 can be activated to send/receive at a time.
 */
 static SoftwareSerial bt_serial(10, 11); //RX, TX
-/** Use MOSI/SCK pins from external 6 pins connector CON_ICSP */
-static SoftwareSerial cairsens_serial(16, 15); //RX, TX
+/** Use HW Uart Serial1  */
+static HardwareSerial* cairsens_serial = &Serial1;
 
 /** Communicate with Cairsens N0X sensor over UART */
-static CairsensUART cairsens(&cairsens_serial);
+static CairsensUART cairsens(cairsens_serial);
 
 /**************************************************************************
  * Global Functions Declarations
@@ -117,11 +117,11 @@ static void statusLedUpdate(void);
 void setup() {
   delay(3000);
   
-  Serial.begin(115200);
+  Serial.begin(500000);
   LOG_INIT(&Serial);
 
   /** Initialize Cairsens UART comm */
-  cairsens_serial.begin(9600);
+  cairsens_serial->begin(9600);
 
   initializeBT();
 
@@ -214,10 +214,6 @@ void loop() {
   
   if ((millis() - no2_starttime) > NO2_SAMPLE_TIME)
   {
-     /** Switch RX to Cairsens UART comm, only on SoftwareSerial instance can receive at a time
-     after this call, no data can be received by bt_serial instance */
-    cairsens_serial.listen();
-    
     uint8_t nox_val = 0;
     if(cairsens.getInstantValue(nox_val) == CairsensUART::NO_ERROR)
     {
@@ -229,9 +225,6 @@ void loop() {
     {
       LOG_ERROR(F("Could not get Cairsens NOX value"));
     }
-      /** Switch RX to BT UART comm, only on SoftwareSerial instance can receive at a time
-     after this call, no data can be received by cairsens_serial instance */
-    bt_serial.listen();
     no2_starttime = millis();
   }
 
