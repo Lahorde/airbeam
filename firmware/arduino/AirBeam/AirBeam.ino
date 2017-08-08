@@ -24,11 +24,12 @@
  * Include Files
  **************************************************************************/
 #include <SoftwareSerial.h>
-#include <DHT.h>
+#include <dht_nonblocking.h>
 #include <stdlib.h>
 #include <cairsens.h>
 #include <logger_config.h>
 #include <TimerOne.h>
+#include <float.h>
 
 /**************************************************************************
  * Macros
@@ -37,14 +38,14 @@
 #define CELSIUS_TEMP
 
 #define DHTPIN 9
-#define DHTTYPE DHT22   // DHT 22  (AM2302)
+#define DHTTYPE DHT_TYPE_22   // DHT 22  (AM2302)
 
 #define LEDPIN 13
 #define BT_BUF_LEN 50
 /**************************************************************************
  * Manifest Constants
  **************************************************************************/
-static const uint16_t BT_PUBLISH_PERIOD = 1000;
+static const uint16_t AVG_PERIOD        = 1000;
 static const uint16_t BT_STATUS_PERIOD  = 100;
 static const uint16_t NO2_SAMPLE_TIME   = 100;
 static const uint16_t PM_SAMPLE_TIME    = 200;
@@ -65,7 +66,7 @@ typedef enum{
  * Static Variables
  **************************************************************************/
 static String airbeam_mac = "";
-static unsigned long bt_publish_time = 0;
+static unsigned long avg_time = 0;
 static unsigned long pm_sum = 0;
 static uint16_t pm_nbmeas;
 static unsigned long pm_starttime = 0;
@@ -81,7 +82,9 @@ static EBTStatus bt_connected = NOT_CONNECTED;
 char bt_index = 0;
 char bt_buffer[BT_BUF_LEN];
 
-static DHT dht(DHTPIN, DHTTYPE);
+static DHT_nonblocking dht(DHTPIN, DHTTYPE);
+static float temp_cel = NAN;
+static float hum = NAN;
 
 /**
  Not all pins on the Leonardo and Micro support change interrupts,
@@ -133,7 +136,7 @@ void setup() {
   
   pm_starttime = millis();
   no2_starttime = millis();
-  bt_publish_time = millis();
+  avg_time = millis();
   bt_status_time = millis();
 
   /** Initially BT not connected */
@@ -141,77 +144,90 @@ void setup() {
 }
 
 void loop() { 
+  /** Always poll DHT */
+  if(dht.measure(&temp_cel, &hum))
+  {
+    LOG_INFO("New DHT measure : %dRH %d°C", temp_cel, hum);
+  }
+
+  /** Periodic BT status update */
   if(millis() - bt_status_time > BT_STATUS_PERIOD)
   {
       update_bt_status();
       bt_status_time = millis();
   }  
 
-  if ((millis() - bt_publish_time) > BT_PUBLISH_PERIOD)
+  /** Periodic measures computing */
+  if ((millis() - avg_time) > AVG_PERIOD)
   {
-    bt_publish_time = millis(); // moved to create more regular periods.
-    double loc_pm = (double)pm_sum/pm_nbmeas;
-    loc_pm = (loc_pm*5.0)/1024;
-    double loc_hppcf = (240.0*pow(loc_pm,6) - 2491.3*pow(loc_pm,5) + 9448.7*pow(loc_pm,4) - 14840.0*pow(loc_pm,3) + 10684.0*pow(loc_pm,2) + 2211.8*(loc_pm) + 7.9623);
-    double loc_ugm3 = .518 + .00274 * loc_hppcf;
-    if(loc_ugm3 < 0)
+    if(temp_cel != NAN && hum != NAN)
     {
-      loc_ugm3 = 0;
-    }
-
-    int loc_humi = dht.readHumidity();
-    int loc_cel = dht.readTemperature();
-  
-    LOG_INFO_LN(F("\n%l - AirBeam MAC: %s - Temp: %f°F %d°C - Hum : %dRH - PM2.5 : hppcf: %f  ugm^3: %f - NO2 Gas: %fppm"), 
-      millis(),
-      airbeam_mac.c_str(),
-      (float)(loc_cel * 9)/5 + 32,
-      loc_cel,
-      loc_humi,
-      loc_hppcf,
-      loc_ugm3,
-      no2_sum/(10.0*no2_nbmeas));
+      /** Compute all sensor measures */
+      avg_time = millis(); // moved to create more regular periods.
+      double loc_pm = (double)pm_sum/pm_nbmeas;
+      loc_pm = (loc_pm*5.0)/1024;
+      double loc_hppcf = (240.0*pow(loc_pm,6) - 2491.3*pow(loc_pm,5) + 9448.7*pow(loc_pm,4) - 14840.0*pow(loc_pm,3) + 10684.0*pow(loc_pm,2) + 2211.8*(loc_pm) + 7.9623);
+      double loc_ugm3 = .518 + .00274 * loc_hppcf;
+      if(loc_ugm3 < 0)
+      {
+        loc_ugm3 = 0;
+      }
     
-    if(bt_connected == CONNECTED){
-      bt_serial.print(loc_ugm3);
-      bt_serial.print((";AirBeam:"));
-      bt_serial.print(airbeam_mac);
-      bt_serial.print((";AirBeam-PM;Particulate Matter;PM;micrograms per cubic meter;µg/m³;0;12;35;55;150"));
-      bt_serial.print("\n");
-
-#ifdef CELSIUS_TEMP
-      bt_serial.print(loc_cel);
-      bt_serial.print((";AirBeam:"));
-      bt_serial.print(airbeam_mac);
-      bt_serial.print((";AirBeam-C;Temperature;F;degrees Celcius;C;-17;-4;10;24;38"));
-#else /** Temperature in fahrenheit */
-      bt_serial.print(((loc_cel * 9)/5) + 32);
-      bt_serial.print((";AirBeam:"));
-      bt_serial.print(airbeam_mac);
-      bt_serial.print((";AirBeam-F;Temperature;F;degrees Fahrenheit;F;0;25;50;75;100"));
-#endif
-      bt_serial.print("\n");
-      
-      bt_serial.print(loc_humi);
-      bt_serial.print((";AirBeam:"));
-      bt_serial.print(airbeam_mac);
-      bt_serial.print((";AirBeam-RH;Humidity;RH;percent;%;0;25;50;75;100"));
-      bt_serial.print("\n");
-      
-      bt_serial.print(no2_sum/(10.0*no2_nbmeas));
-      bt_serial.print((";AirBeam:"));
-      bt_serial.print(airbeam_mac);
-      bt_serial.print(";Cairsens A40-0020-B;Azote dioxyde;N02;micrograms per cubic meter;µg/m³;0;12;35;55;150");
-      bt_serial.print("\n");
-     
-      no2_sum = 0;
-      no2_nbmeas = 0;
-
-      pm_sum = 0;
-      pm_nbmeas = 0;
-    }
-  }
+      LOG_INFO_LN(F("\n%l - AirBeam MAC: %s - Temp: %f°F %f°C - Hum : %dRH - PM2.5 : hppcf: %f  ugm^3: %f - NO2 Gas: %fppm"), 
+        millis(),
+        airbeam_mac.c_str(),
+        (temp_cel * 9)/5 + 32,
+        temp_cel,
+        hum,
+        loc_hppcf,
+        loc_ugm3,
+        no2_sum/(10.0*no2_nbmeas));
+    
+      if(bt_connected == CONNECTED){
+        bt_serial.print(loc_ugm3);
+        bt_serial.print((";AirBeam:"));
+        bt_serial.print(airbeam_mac);
+        bt_serial.print((";AirBeam-PM;Particulate Matter;PM;micrograms per cubic meter;µg/m³;0;12;35;55;150"));
+        bt_serial.print("\n");
   
+  #ifdef CELSIUS_TEMP
+        bt_serial.print(temp_cel);
+        bt_serial.print((";AirBeam:"));
+        bt_serial.print(airbeam_mac);
+        bt_serial.print((";AirBeam-C;Temperature;F;degrees Celcius;C;-17;-4;10;24;38"));
+  #else /** Temperature in fahrenheit */
+        bt_serial.print(((temp_cel * 9)/5) + 32);
+        bt_serial.print((";AirBeam:"));
+        bt_serial.print(airbeam_mac);
+        bt_serial.print((";AirBeam-F;Temperature;F;degrees Fahrenheit;F;0;25;50;75;100"));
+  #endif
+        bt_serial.print("\n");
+        
+        bt_serial.print(hum);
+        bt_serial.print((";AirBeam:"));
+        bt_serial.print(airbeam_mac);
+        bt_serial.print((";AirBeam-RH;Humidity;RH;percent;%;0;25;50;75;100"));
+        bt_serial.print("\n");
+        
+        bt_serial.print(no2_sum/(10.0*no2_nbmeas));
+        bt_serial.print((";AirBeam:"));
+        bt_serial.print(airbeam_mac);
+        bt_serial.print(";Cairsens A40-0020-B;Azote dioxyde;N02;micrograms per cubic meter;µg/m³;0;12;35;55;150");
+        bt_serial.print("\n");
+      }
+    }
+    else /** Measurements data set not ready */
+    {
+      LOG_INFO_LN(F("Data set not ready : cannot get humidity or temperature measures"));
+    }
+    no2_sum = 0;
+    no2_nbmeas = 0;
+  
+    pm_sum = 0;
+    pm_nbmeas = 0;
+  }
+
+  /** Periodic NO2 measurement */
   if ((millis() - no2_starttime) > NO2_SAMPLE_TIME)
   {
     uint8_t nox_val = 0;
@@ -228,6 +244,7 @@ void loop() {
     no2_starttime = millis();
   }
 
+  /** Periodic PM measurement */
   if ((millis() - pm_starttime) > PM_SAMPLE_TIME)
   {
     /** Read PM val */
