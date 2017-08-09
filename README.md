@@ -1,4 +1,7 @@
 # Description
+
+<img src="https://github.com/Lahorde/airbeam/blob/AirBeam_CairsensN02/img/airbeam_cairsens_fixation.JPG?raw=true" width="700">
+
 Add NO2 sensor to AirBeam. We use [Cairclip Sensor A40-0020-B](http://cairpol.com/fr/savoir-faire-systemes-autonomes-pour-la-surveillance-de-polluants-a-faible-concentration/produits-cairnet-cairtube-cairclip-capteur-cairsens/cairclip-solution-ultra-portable/) 
 
 # Connect Cairsens NO2 sensor
