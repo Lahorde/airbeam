@@ -4,6 +4,8 @@
 
 Add NO2 sensor to AirBeam. We use [Cairclip Sensor A40-0020-B](http://cairpol.com/fr/savoir-faire-systemes-autonomes-pour-la-surveillance-de-polluants-a-faible-concentration/produits-cairnet-cairtube-cairclip-capteur-cairsens/cairclip-solution-ultra-portable/) 
 
+Here is an article about [Cairsens N02 data quality](http://www.mdpi.com/2504-3900/1/4/473/pdf)
+
 # Connect Cairsens NO2 sensor
 Cairclip sensor must be powered to 5V. It uses an UART @9600bps to communicate. Refer doc in `./doc/datasheet/CairClipUart-Interface-Protocole-downloadDataOnly.211116.pdf`
 
