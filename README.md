@@ -67,3 +67,4 @@ You will add NO2 concentration in AirCasting application :
 # References
 
 * [Reprogram your AirBeam](http://www.takingspace.org/reprogram-your-airbeam/)
+* [A post on taking space about this modification](http://www.takingspace.org/)
